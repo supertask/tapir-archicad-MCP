@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 # Window classes Archicad (DG library) and the Windows common dialogs use for
 # modal dialogs. Palettes and the main frame use other DG* classes.
 MODAL_DIALOG_CLASSES = ("DGModalDlgClass", "#32770")
+MAIN_FRAME_CLASSES = ("DGFrameWindow",)
 # A dialog whose buttons are all of these (or which has no button at all) is
 # treated as a progress window rather than a question waiting for an answer.
 CANCEL_LIKE_BUTTONS = {"cancel", "キャンセル", "中止", "stop", "停止", "abort"}
@@ -139,10 +140,16 @@ if sys.platform == "win32":
         )
 
     def list_dialogs_for_pid(pid: int) -> list[DialogInfo]:
+        windows = _top_level_windows(pid)
+        frames = [hwnd for hwnd in windows if _window_class(hwnd) in MAIN_FRAME_CLASSES]
+        # A modal dialog disables its owner; a dialog next to a usable main window does not block.
+        frame_disabled = not frames or any(not _user32.IsWindowEnabled(hwnd) for hwnd in frames)
         dialogs = []
-        for hwnd in _top_level_windows(pid):
+        for hwnd in windows:
             if _window_class(hwnd) in MODAL_DIALOG_CLASSES and _user32.IsWindowEnabled(hwnd):
-                dialogs.append(_read_dialog(hwnd))
+                dialog = _read_dialog(hwnd)
+                dialog.blocking = dialog.blocking and frame_disabled
+                dialogs.append(dialog)
         return dialogs
 
 

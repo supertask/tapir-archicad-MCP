@@ -246,6 +246,18 @@ def test_preflight_passes_when_alive_and_can_be_disabled(fake_dialogs):
     _guard(fake_dialogs, preflight_timeout_seconds=0).preflight(_header(never), PORT)
 
 
+def test_preflight_refuses_dialogs_archicad_answers_is_alive_behind(fake_dialogs):
+    """Tapir's alerts are Windows message boxes: IsAlive succeeds, commands still queue."""
+    guard = _guard(fake_dialogs)
+    alive = _header(lambda command, parameters=None, timeout=None: {})
+    fake_dialogs.by_port[PORT] = [DialogInfo(title="MCP保留テスト", buttons=["OK"], windowClass="#32770")]
+    with pytest.raises(ArchicadUnresponsiveError, match="(?s)NOT sent.*MCP保留テスト"):
+        guard.preflight(alive, PORT)
+
+    fake_dialogs.by_port[PORT] = [DialogInfo(title="Find", buttons=["OK"], blocking=False)]
+    guard.preflight(alive, PORT)
+
+
 def test_preflight_ignores_unrelated_errors(fake_dialogs):
     guard = _guard(fake_dialogs)
 

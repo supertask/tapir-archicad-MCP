@@ -366,7 +366,13 @@ class CommandGuard:
             return
         try:
             post_command("API.IsAlive", timeout=timeout)
-            return
+            # Archicad answers IsAlive behind some dialogs (Windows message boxes such as Tapir's own
+            # alerts) that still block commands; refuse those too.
+            dialogs = [d for d in self._list_dialogs(port) if d.blocking]
+            if not dialogs:
+                return
+            dialog_name = None
+            reason = "modal dialog"
         except StandardAPIError as e:
             match = _MODAL_DIALOG_MESSAGE.search(e.message or "")
             if match is None:
