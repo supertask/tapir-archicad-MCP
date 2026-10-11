@@ -28,6 +28,11 @@ def _clear_http_env(monkeypatch):
         "TAPIR_MCP_ASYNC_THRESHOLD_SECONDS",
         "TAPIR_MCP_JOB_TTL_SECONDS",
         "TAPIR_MCP_MAX_COMPLETED_JOBS",
+        "TAPIR_MCP_COMMAND_TIMEOUT_SECONDS",
+        "TAPIR_MCP_LONG_COMMAND_TIMEOUT_SECONDS",
+        "TAPIR_MCP_COMMAND_TIMEOUTS",
+        "TAPIR_MCP_PREFLIGHT_TIMEOUT_SECONDS",
+        "TAPIR_MCP_DIALOG_GRACE_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -196,3 +201,63 @@ def test_invalid_environment_is_rejected(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["server.py"])
     with pytest.raises(SystemExit):
         parse_args()
+
+
+def test_command_guard_configuration_defaults_and_environment_cli_precedence(monkeypatch):
+    from tapir_archicad_mcp.server import parse_args
+
+    def guard_args(args):
+        return (
+            args.command_timeout_seconds, args.long_command_timeout_seconds, args.command_timeouts,
+            args.preflight_timeout_seconds, args.dialog_grace_seconds,
+        )
+
+    _clear_http_env(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["server.py"])
+    assert guard_args(parse_args()) == (60, 900, {}, 5, 10)
+    monkeypatch.setenv("TAPIR_MCP_COMMAND_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("TAPIR_MCP_LONG_COMMAND_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("TAPIR_MCP_COMMAND_TIMEOUTS", "project_open_project=1200,elements_get_all_elements=5")
+    monkeypatch.setenv("TAPIR_MCP_PREFLIGHT_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("TAPIR_MCP_DIALOG_GRACE_SECONDS", "3")
+    assert guard_args(parse_args()) == (
+        30, 0, {"project_open_project": 1200, "elements_get_all_elements": 5}, 0, 3,
+    )
+    monkeypatch.setattr(sys, "argv", [
+        "server.py", "--command-timeout-seconds", "90", "--command-timeouts", "a_b=2",
+        "--dialog-grace-seconds", "0",
+    ])
+    assert guard_args(parse_args()) == (90, 0, {"a_b": 2}, 0, 0)
+
+
+@pytest.mark.parametrize("flag,value", [
+    ("--command-timeout-seconds", "-1"), ("--command-timeout-seconds", "nan"),
+    ("--long-command-timeout-seconds", "inf"), ("--preflight-timeout-seconds", "x"),
+    ("--dialog-grace-seconds", "-0.5"), ("--command-timeouts", "no_seconds"),
+    ("--command-timeouts", "a_b=-3"),
+])
+def test_invalid_command_guard_configuration_fails_at_startup(monkeypatch, flag, value):
+    from tapir_archicad_mcp.server import parse_args
+
+    _clear_http_env(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["server.py", flag, value])
+    with pytest.raises(SystemExit) as error:
+        parse_args()
+    assert error.value.code == 2
+
+
+def test_command_guard_settings_reach_lifespan(monkeypatch, mock_server_run):
+    import tapir_archicad_mcp.app as app_module
+    from tapir_archicad_mcp.command_guard import GuardSettings
+    from tapir_archicad_mcp.server import main
+
+    _clear_http_env(monkeypatch)
+    monkeypatch.setattr(app_module, "guard_settings", GuardSettings())
+    monkeypatch.setattr(sys, "argv", [
+        "server.py", "--command-timeout-seconds", "20", "--command-timeouts", "project_open_project=0",
+    ])
+    main()
+    settings = app_module.guard_settings
+    assert settings.timeout_for("elements_get_selected_elements") == 20
+    assert settings.timeout_for("navigator_publish_publisher_set") == 900
+    assert settings.timeout_for("project_open_project") is None

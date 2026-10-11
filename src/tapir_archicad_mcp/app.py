@@ -7,11 +7,13 @@ from mcp.server.mcpserver import MCPServer
 from multiconn_archicad import MultiConn
 from starlette.applications import Starlette
 
-from tapir_archicad_mcp.context import job_store_instance, mcp_instance, multi_conn_instance
+from tapir_archicad_mcp.command_guard import CommandGuard, GuardSettings
+from tapir_archicad_mcp.context import command_guard_instance, job_store_instance, mcp_instance, multi_conn_instance
 from tapir_archicad_mcp.jobs import JobSettings, JobStore
 
 log = logging.getLogger(__name__)
 job_settings = JobSettings()
+guard_settings = GuardSettings()
 
 
 class ArchicadMCPServer(MCPServer):
@@ -52,6 +54,7 @@ async def app_lifespan(server: MCPServer) -> AsyncIterator[None]:
     multi_conn_instance.set(multi_conn)
     job_store = JobStore(job_settings)
     job_store_instance.set(job_store)
+    command_guard_instance.set(CommandGuard(guard_settings))
 
     cleanup = asyncio.create_task(job_store.cleanup_loop())
     try:
@@ -67,6 +70,7 @@ async def app_lifespan(server: MCPServer) -> AsyncIterator[None]:
         # Keep connection state available until every admitted worker has finished.
         await asyncio.to_thread(job_store.shutdown)
         job_store_instance.clear()
+        command_guard_instance.clear()
         mcp_instance.clear()
         multi_conn_instance.clear()
 

@@ -6,7 +6,8 @@ import pytest
 from multiconn_archicad import ArchicadLocation, Port, ProductInfo, SoloProjectID
 
 import tapir_archicad_mcp.model_configuration  # noqa: F401
-from tapir_archicad_mcp.context import job_store_instance, multi_conn_instance
+from tapir_archicad_mcp.command_guard import CommandGuard
+from tapir_archicad_mcp.context import command_guard_instance, job_store_instance, multi_conn_instance
 from tapir_archicad_mcp.jobs import JobSettings, JobStore
 
 
@@ -18,6 +19,29 @@ def job_store(monkeypatch, job_clock):
     yield store
     store.shutdown()
     job_store_instance.clear()
+
+
+class FakeDialogs:
+    """Stands in for the Win32 dialog lookup so tests never see a real Archicad's dialogs."""
+
+    def __init__(self) -> None:
+        self.by_port: dict[int, list] = {}
+
+    def __call__(self, port: int) -> list:
+        return list(self.by_port.get(port, []))
+
+
+@pytest.fixture
+def fake_dialogs():
+    return FakeDialogs()
+
+
+@pytest.fixture(autouse=True)
+def command_guard(fake_dialogs):
+    guard = CommandGuard(dialog_lister=fake_dialogs)
+    command_guard_instance.set(guard)
+    yield guard
+    command_guard_instance.clear()
 
 
 @pytest.fixture

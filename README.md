@@ -82,6 +82,11 @@ You can customize the server via CLI flags or environment variables:
 | `--async-threshold-seconds` | `TAPIR_MCP_ASYNC_THRESHOLD_SECONDS` | `45` | Seconds to wait before returning a running job handle |
 | `--job-ttl-seconds` | `TAPIR_MCP_JOB_TTL_SECONDS` | `86400` | Seconds to keep finished jobs; `0` disables time-based expiry |
 | `--max-completed-jobs` | `TAPIR_MCP_MAX_COMPLETED_JOBS` | `128` | Maximum number of finished jobs to keep |
+| `--command-timeout-seconds` | `TAPIR_MCP_COMMAND_TIMEOUT_SECONDS` | `60` | Time limit for one Archicad command; `0` waits without limit |
+| `--long-command-timeout-seconds` | `TAPIR_MCP_LONG_COMMAND_TIMEOUT_SECONDS` | `900` | Time limit for long-running commands (opening, saving, publishing, IFC, Teamwork…) |
+| `--command-timeouts` | `TAPIR_MCP_COMMAND_TIMEOUTS` | - | Per-command limits as `command=seconds,command=seconds`, e.g. `project_open_project=1800` |
+| `--preflight-timeout-seconds` | `TAPIR_MCP_PREFLIGHT_TIMEOUT_SECONDS` | `5` | Time limit of the `API.IsAlive` check sent before each command; `0` disables it |
+| `--dialog-grace-seconds` | `TAPIR_MCP_DIALOG_GRACE_SECONDS` | `10` | Stop waiting once a modal dialog has blocked Archicad this long; `0` disables |
 
 CLI flags override environment variables.
 
@@ -98,6 +103,15 @@ Call `archicad_get_job(job_handle="job:83af21...")` to check progress and retrie
 If a response is lost, call `archicad_get_job()` to list recent jobs before repeating a command that changes the project. Cancelling a request does not stop a command already started, and retrying it may duplicate changes.
 
 Jobs remain available across HTTP client reconnects while the server is running, but are lost on server restart. Retention defaults to 24 hours and a maximum of 128 finished jobs.
+
+## Modal dialogs, time limits and duplicate protection
+
+While Archicad shows a modal dialog (for example *Missing Add-Ons* after opening a project) it does not process API commands: they wait in its queue and run when the dialog is closed. The server guards against this:
+
+- **Preflight.** Before each command the server sends `API.IsAlive`, which Archicad answers even behind a dialog. If a dialog is open, the call fails immediately with the dialog's title, text and buttons, and the command is **not sent**.
+- **Time limits.** Every command has a limit (60 s by default, 900 s for long-running commands such as `project_open_project` or `navigator_publish_publisher_set`; see the options above). If a blocking dialog appears while a command runs, the server stops waiting after `--dialog-grace-seconds`. The error says Archicad is not responding and lists the dialogs found.
+- **Pending commands.** A command abandoned this way is still queued inside Archicad. The server records it, keeps listening, and records whether it later succeeded or failed (`archicad_list_pending_commands`). An identical write command (same name, port and parameters) is refused while such a record exists; pass `allow_duplicate=true` to `archicad_call_tool` to send it anyway, or forget the record with `archicad_clear_pending_commands`. Read commands (`*_get_*`, `*_list_*`…) are never refused.
+- **`archicad_get_dialogs`** lists the modal dialogs each Archicad instance is showing. It never presses a button. Dialog inspection uses Win32 and is available on Windows only; elsewhere the preflight still reports the dialog name Archicad gives.
 
 ## Usage
 

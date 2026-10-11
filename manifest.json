@@ -62,6 +62,18 @@
     {
       "name": "archicad_get_job",
       "description": "Retrieves a running or finished execution by handle, or lists retained jobs to recover a lost response."
+    },
+    {
+      "name": "archicad_get_dialogs",
+      "description": "Lists the modal dialogs (title, text, buttons) that keep Archicad from processing commands."
+    },
+    {
+      "name": "archicad_list_pending_commands",
+      "description": "Lists commands abandoned because Archicad did not answer, which stay queued in Archicad, and their late outcome."
+    },
+    {
+      "name": "archicad_clear_pending_commands",
+      "description": "Forgets pending-command records so identical commands can be sent again."
     }
   ],
   "compatibility": {

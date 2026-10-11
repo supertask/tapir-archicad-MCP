@@ -18,7 +18,8 @@ from multiconn_archicad.errors import AddOnCommandUnavailable, APIErrorBase
 from pydantic import ValidationError
 
 from tapir_archicad_mcp.app import mcp
-from tapir_archicad_mcp.context import job_store_instance, multi_conn_instance
+from tapir_archicad_mcp.context import command_guard_instance, job_store_instance, multi_conn_instance
+from tapir_archicad_mcp.dialogs import dialogs_supported, list_dialogs_for_port
 from tapir_archicad_mcp.jobs import JobStore
 from tapir_archicad_mcp.pagination import PaginationRequest, prepare_result
 from tapir_archicad_mcp.request_lifecycle import DispatchLifecycle
@@ -222,7 +223,12 @@ def archicad_get_command_schema(command_name: str) -> CommandSchema:
         "and add a 'page_token' key to the 'arguments' dictionary. "
         "Long executions return status='running' and a jobHandle; retrieve them with archicad_get_job. "
         "If a response is lost or cancelled, list jobs with archicad_get_job() before retrying a write. "
-        "Cancelling this request does not cancel an admitted execution."
+        "Cancelling this request does not cancel an admitted execution. "
+        "Every command has a time limit. If Archicad shows a modal dialog (for example a missing add-on warning) "
+        "it cannot process commands: the call fails with the dialog's title, text and buttons. Ask the user to "
+        "close the dialog. A command abandoned this way stays queued in Archicad and runs when the dialog is "
+        "closed, so never resend it; check archicad_list_pending_commands. Identical writes that are still "
+        "pending are refused unless allow_duplicate is true."
     ),
     annotations=ToolAnnotations(
         readOnlyHint=False,
@@ -231,7 +237,7 @@ def archicad_get_command_schema(command_name: str) -> CommandSchema:
         openWorldHint=True,
     ),
 )
-async def archicad_call_tool(name: str, arguments: dict) -> dict:
+async def archicad_call_tool(name: str, arguments: dict, allow_duplicate: bool = False) -> dict:
     log.info(f"Executing archicad_call_tool for tool: {name}")
 
     tool_entry = get_tool_entry(name)
@@ -246,6 +252,8 @@ async def archicad_call_tool(name: str, arguments: dict) -> dict:
     if tool_entry.pagination_field is not None and validated_arguments.page_token is not None:
         # Continuations read retained data and do not create execution jobs.
         return await asyncio.to_thread(_read_cached_page, name, tool_entry, validated_arguments, store)
+    if not allow_duplicate:
+        command_guard_instance.get().check_duplicate(name, port, _parameters_of(tool_entry, validated_arguments))
     job = store.submit(
         name, port, arguments,
         lambda handle: _execute_tool(name, tool_entry, validated_arguments, handle),
@@ -271,8 +279,13 @@ def _execute_tool(name: str, tool_entry: ToolRegistryEntry, validated_arguments:
     if tool_entry.params_model:
         call_args["params"] = validated_arguments.params
 
+    guard = command_guard_instance.get()
     with DispatchLifecycle(name, port, job_handle):
-        result = _dispatch_command(name, tool_entry, call_args, port)
+        guard.preflight(conn_header, port)
+        result = guard.run(
+            name, port, _parameters_of(tool_entry, validated_arguments),
+            lambda: _dispatch_command(name, tool_entry, call_args, port),
+        )
     if tool_entry.pagination_field is None:
         return result
     request = _pagination_request(name, tool_entry, validated_arguments, conn_header)
@@ -304,6 +317,10 @@ def _pagination_request(
         parameters=_serialized_parameters(arguments.params if tool_entry.params_model else None),
         field=tool_entry.pagination_field,
     )
+
+
+def _parameters_of(tool_entry: ToolRegistryEntry, arguments: Any) -> str:
+    return _serialized_parameters(arguments.params if tool_entry.params_model else None)
 
 
 def _serialized_parameters(params: Any) -> str:
@@ -339,3 +356,68 @@ async def archicad_get_job(job_handle: str | None = None) -> dict:
     job = store.get(job_handle)
     await store.wait(job)
     return store.response(job)
+
+
+@mcp.tool(
+    name="archicad_get_dialogs",
+    title="Get Archicad Modal Dialogs",
+    description=(
+        "Lists the modal dialogs (title, text, button labels) each running Archicad is showing. While a modal "
+        "dialog is open Archicad does not process commands. Pass a port to inspect one instance; without it every "
+        "active instance is inspected. Read-only: it never presses a button. Windows only."
+    ),
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True,
+    ),
+)
+async def archicad_get_dialogs(port: int | None = None) -> dict:
+    if not dialogs_supported():
+        return {"supported": False, "instances": [],
+                "message": "Dialog inspection is only available on Windows."}
+    if port is not None:
+        ports = [port]
+    else:
+        ports = await asyncio.to_thread(lambda: [int(p) for p in multi_conn_instance.get().open_port_headers])
+    instances = []
+    for target in ports:
+        dialogs = await asyncio.to_thread(list_dialogs_for_port, target)
+        instances.append({
+            "port": target,
+            "blocked": any(d.blocking for d in dialogs),
+            "dialogs": [d.to_dict() for d in dialogs],
+        })
+    return {"supported": True, "instances": instances}
+
+
+@mcp.tool(
+    name="archicad_list_pending_commands",
+    title="List Pending Archicad Commands",
+    description=(
+        "Lists commands this server stopped waiting for because Archicad did not answer (usually because of a "
+        "modal dialog). Such a command stays queued inside Archicad and runs when the dialog is closed. status is "
+        "'queued_in_archicad', 'executed_late' or 'failed_late' (with its outcome). Check this before resending a "
+        "command that timed out."
+    ),
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+    ),
+)
+def archicad_list_pending_commands() -> dict:
+    return {"pendingCommands": command_guard_instance.get().pending.summaries()}
+
+
+@mcp.tool(
+    name="archicad_clear_pending_commands",
+    title="Clear Pending Archicad Command Records",
+    description=(
+        "Forgets pending-command records once the user has checked their effect, so identical commands can be "
+        "sent again. With pending_ids, removes exactly those records. Without it, removes every record that has "
+        "already finished (optionally only for one port); records still queued in Archicad are kept. This only "
+        "edits this server's records; it never touches Archicad."
+    ),
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+    ),
+)
+def archicad_clear_pending_commands(pending_ids: list[str] | None = None, port: int | None = None) -> dict:
+    return {"removed": command_guard_instance.get().pending.clear(pending_ids, port)}

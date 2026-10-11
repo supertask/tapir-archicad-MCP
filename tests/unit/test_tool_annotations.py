@@ -9,6 +9,8 @@ READ_ONLY_TOOLS = {
     "archicad_list_commands": False,
     "archicad_get_command_schema": False,
     "archicad_get_job": False,
+    "archicad_get_dialogs": True,
+    "archicad_list_pending_commands": False,
 }
 
 
@@ -34,3 +36,12 @@ def test_call_tool_is_write_delete():
     assert annotations.destructive_hint is True
     assert annotations.idempotent_hint is False
     assert annotations.open_world_hint is True
+
+
+def test_clearing_pending_records_is_a_local_non_destructive_write():
+    annotations = _tools_by_name()["archicad_clear_pending_commands"].annotations
+    assert annotations is not None
+    assert annotations.read_only_hint is False
+    assert annotations.destructive_hint is False
+    assert annotations.idempotent_hint is True
+    assert annotations.open_world_hint is False
