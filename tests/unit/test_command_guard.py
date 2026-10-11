@@ -17,8 +17,8 @@ from tapir_archicad_mcp.command_guard import (
 )
 from tapir_archicad_mcp.context import command_guard_instance
 from tapir_archicad_mcp.dialogs import DialogInfo, is_cancel_like
-from tapir_archicad_mcp.tools.custom.functions import (
-    archicad_call_tool,
+from tapir_archicad_mcp.tools.custom.functions import archicad_call_tool
+from tapir_archicad_mcp.tools.custom.guard_tools import (
     archicad_clear_pending_commands,
     archicad_get_dialogs,
     archicad_list_pending_commands,
@@ -368,7 +368,7 @@ async def test_call_tool_preflight_sends_nothing_behind_an_open_dialog(fake_arch
 
 @pytest.mark.asyncio
 async def test_get_dialogs_tool(fake_archicad, monkeypatch):
-    from tapir_archicad_mcp.tools.custom import functions
+    from tapir_archicad_mcp.tools.custom import guard_tools as functions
 
     monkeypatch.setattr(functions, "dialogs_supported", lambda: True)
     monkeypatch.setattr(functions, "list_dialogs_for_port", lambda port: [MISSING_ADDON])

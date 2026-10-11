@@ -7,7 +7,7 @@ from typing import Any
 
 import tapir_archicad_mcp.model_configuration  # noqa: F401
 from tapir_archicad_mcp.app import mcp
-from tapir_archicad_mcp.command_guard import GuardSettings, parse_timeout_overrides
+from tapir_archicad_mcp.command_guard import add_guard_arguments, guard_settings_from_args
 from tapir_archicad_mcp.jobs import JobSettings
 from tapir_archicad_mcp.logging_config import setup_logging
 from tapir_archicad_mcp.middleware import BearerTokenMiddleware
@@ -36,13 +36,6 @@ def _positive_int(value: str) -> int:
     if number <= 0:
         raise argparse.ArgumentTypeError("Expected a positive integer.")
     return number
-
-
-def _timeout_overrides(value: str) -> dict[str, float]:
-    try:
-        return parse_timeout_overrides(value)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,33 +87,7 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("TAPIR_MCP_MAX_COMPLETED_JOBS", "128"),
         help="Maximum retained completed/failed jobs; oldest are evicted with their pages (default: 128).",
     )
-    parser.add_argument(
-        "--command-timeout-seconds", type=_nonnegative_float,
-        default=os.getenv("TAPIR_MCP_COMMAND_TIMEOUT_SECONDS", "60"),
-        help="Time limit for one Archicad command; 0 waits without limit (default: 60).",
-    )
-    parser.add_argument(
-        "--long-command-timeout-seconds", type=_nonnegative_float,
-        default=os.getenv("TAPIR_MCP_LONG_COMMAND_TIMEOUT_SECONDS", "900"),
-        help="Time limit for long-running commands such as opening projects or publishing; 0 waits without "
-             "limit (default: 900).",
-    )
-    parser.add_argument(
-        "--command-timeouts", type=_timeout_overrides,
-        default=os.getenv("TAPIR_MCP_COMMAND_TIMEOUTS", ""),
-        help="Per-command time limits as 'command=seconds,command=seconds'; overrides the two limits above.",
-    )
-    parser.add_argument(
-        "--preflight-timeout-seconds", type=_nonnegative_float,
-        default=os.getenv("TAPIR_MCP_PREFLIGHT_TIMEOUT_SECONDS", "5"),
-        help="Time limit of the API.IsAlive check sent before each command; 0 disables the check (default: 5).",
-    )
-    parser.add_argument(
-        "--dialog-grace-seconds", type=_nonnegative_float,
-        default=os.getenv("TAPIR_MCP_DIALOG_GRACE_SECONDS", "10"),
-        help="Stop waiting for a command once a modal dialog has blocked Archicad this long; 0 disables "
-             "(default: 10).",
-    )
+    add_guard_arguments(parser)
     return parser.parse_args()
 
 
@@ -145,13 +112,7 @@ def main():
         job_ttl_seconds=args.job_ttl_seconds,
         max_completed_jobs=args.max_completed_jobs,
     )
-    app_module.guard_settings = GuardSettings(
-        command_timeout_seconds=args.command_timeout_seconds,
-        long_command_timeout_seconds=args.long_command_timeout_seconds,
-        command_timeout_overrides=args.command_timeouts,
-        preflight_timeout_seconds=args.preflight_timeout_seconds,
-        dialog_grace_seconds=args.dialog_grace_seconds,
-    )
+    app_module.guard_settings = guard_settings_from_args(args)
     sys.argv = [sys.argv[0]]
 
     logging.info(

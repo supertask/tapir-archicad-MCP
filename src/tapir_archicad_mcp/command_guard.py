@@ -13,9 +13,11 @@ dispatch therefore waits forever. This module
   the user has seen what happened.
 """
 
+import argparse
 import json
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -111,6 +113,61 @@ def parse_timeout_overrides(text: str | None) -> dict[str, float]:
             raise ValueError(f"Invalid number of seconds for '{name.strip()}': {value}")
         overrides[name.strip()] = seconds
     return overrides
+
+
+def _seconds(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise argparse.ArgumentTypeError("Expected a finite nonnegative number.")
+    return number
+
+
+def _overrides(value: str) -> dict[str, float]:
+    try:
+        return parse_timeout_overrides(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
+
+
+def add_guard_arguments(parser: argparse.ArgumentParser) -> None:
+    """CLI options of the guard; each falls back to a TAPIR_MCP_* environment variable."""
+    parser.add_argument(
+        "--command-timeout-seconds", type=_seconds,
+        default=os.getenv("TAPIR_MCP_COMMAND_TIMEOUT_SECONDS", "60"),
+        help="Time limit for one Archicad command; 0 waits without limit (default: 60).",
+    )
+    parser.add_argument(
+        "--long-command-timeout-seconds", type=_seconds,
+        default=os.getenv("TAPIR_MCP_LONG_COMMAND_TIMEOUT_SECONDS", "900"),
+        help="Time limit for long-running commands such as opening projects or publishing; 0 waits without "
+             "limit (default: 900).",
+    )
+    parser.add_argument(
+        "--command-timeouts", type=_overrides,
+        default=os.getenv("TAPIR_MCP_COMMAND_TIMEOUTS", ""),
+        help="Per-command time limits as 'command=seconds,command=seconds'; overrides the two limits above.",
+    )
+    parser.add_argument(
+        "--preflight-timeout-seconds", type=_seconds,
+        default=os.getenv("TAPIR_MCP_PREFLIGHT_TIMEOUT_SECONDS", "5"),
+        help="Time limit of the API.IsAlive check sent before each command; 0 disables the check (default: 5).",
+    )
+    parser.add_argument(
+        "--dialog-grace-seconds", type=_seconds,
+        default=os.getenv("TAPIR_MCP_DIALOG_GRACE_SECONDS", "10"),
+        help="Stop waiting for a command once a modal dialog has blocked Archicad this long; 0 disables "
+             "(default: 10).",
+    )
+
+
+def guard_settings_from_args(args: argparse.Namespace) -> GuardSettings:
+    return GuardSettings(
+        command_timeout_seconds=args.command_timeout_seconds,
+        long_command_timeout_seconds=args.long_command_timeout_seconds,
+        command_timeout_overrides=args.command_timeouts,
+        preflight_timeout_seconds=args.preflight_timeout_seconds,
+        dialog_grace_seconds=args.dialog_grace_seconds,
+    )
 
 
 def is_read_only_command(command: str) -> bool:
