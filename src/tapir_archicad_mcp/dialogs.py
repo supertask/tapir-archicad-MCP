@@ -182,6 +182,11 @@ def _cached_pid(port: int) -> int | None:
     return pid
 
 
+def pid_for_port(port: int) -> int | None:
+    """The PID of the Archicad listening on a port (cached while that process lives)."""
+    return _cached_pid(port)
+
+
 def list_dialogs_for_port(port: int) -> list[DialogInfo]:
     """List the modal dialogs of the Archicad listening on a port; never raises."""
     try:

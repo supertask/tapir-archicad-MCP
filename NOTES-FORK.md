@@ -75,3 +75,21 @@ git push origin master feature/command-timeouts-and-dialogs
 - 古い `.venv`（0.6.4）は、既に起動しているセッションが使い終わるまで残す。全クライアントを閉じた時に `.venv` を同期し直して設定を戻すか、`.venv-065` をそのまま使い続けるかを決める。
 - 次回以降の同期でも同じ問題が起きたら、`UV_PROJECT_ENVIRONMENT` で新しいフォルダに入れて設定を向け直す。
 - `command_guard.py` の `LONG_RUNNING_COMMANDS` に、v0.6.5 で増えた `project_update_hotlinks` と `project_change_hotlink_nodes` を追加した。
+
+## 追加したツール（2026-10-17）
+
+他の Archicad MCP（davidharutyunyan/archicad-mcp-connector、Boti-Ormandi/archicad-mcp、alesdev88/Archicad-MCP、vitormartins-arq/archicad-mcp-aberto ほか）のコードを読み、Archicad 26 + Windows で独自アドオンなしにできるものを取り入れた。
+
+| ツール | 内容 | ファイル |
+| --- | --- | --- |
+| `archicad_capture_view` | 必要ならビューを開いてズームし、描画が落ち着くのを待ってから Archicad のウィンドウを PrintWindow で撮って画像で返す。返す画像は長辺 `max_size`（既定 2048、0 で原寸）、原寸 PNG は必ず保存してパスを返す | `capture.py`、`tools/custom/vision_tools.py` |
+| `archicad_get_preview_image` | 要素のプレビュー／ゾーンの平面切り抜きを、base64 の文字ではなく画像で返す | `tools/custom/vision_tools.py` |
+| `archicad_publish` | パブリッシャーセットを書き出し、できたファイルを列挙し、PDF の先頭ページを画像で返す（pypdfium2） | `tools/custom/vision_tools.py` |
+| `archicad_batch` | 複数の命令を1回で順に実行し、1件ずつ結果を返す。全件を先に検証、失敗で停止、`expect_window_type` でウィンドウ違いを防ぐ。各命令はガードを通る | `tools/custom/workflow_tools.py` |
+| `archicad_save_project` | 保存後にファイルの更新時刻を確認して、本当に保存できたかを返す | `tools/custom/workflow_tools.py` |
+| `archicad_get_guide` | Archicad 26 日本語版の使い方ガイド | `guides/archicad26_guide.md` |
+| `archicad_list_commands(query=)` | 命令一覧をキーワードで絞り込み（upstream の `functions.py` への小さな差し込み） | `tools/custom/functions.py` |
+
+- 依存に Pillow と pypdfium2 を追加した（PyMuPDF は AGPL なので使わない）。
+- 撮影の解像度は Archicad のウィンドウの大きさで決まる。スライドなどで大きな絵が要る時は `archicad_publish` の PDF を使う。
+- 3D のカメラは Tapir 1.7.1 では設定できない。Tapir 本体には `Get/Set3DProjectionSettings` が取り込み済み（2026-10-15、1.7.1 の後）なので、次の版が出たら回転撮影を足す。
