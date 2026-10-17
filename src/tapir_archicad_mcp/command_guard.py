@@ -46,6 +46,8 @@ LONG_RUNNING_COMMANDS = frozenset(
         "project_print_view",
         "project_rebuild_view",
         "project_create_hotlink_nodes",
+        "project_update_hotlinks",
+        "project_change_hotlink_nodes",
         "navigator_publish_publisher_set",
         "navigator_update_drawings",
         "ifc_ifc_file_operation",
