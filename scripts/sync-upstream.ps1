@@ -1,10 +1,10 @@
-# Merge the latest upstream (SzamosiMate/tapir-archicad-MCP) master into the fork's working branch,
+# Merge the latest upstream (SzamosiMate/tapir-archicad-MCP) master into the fork's master,
 # reinstall, and run the tests. Nothing is pushed: review the result, then `git push` yourself.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\sync-upstream.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts\sync-upstream.ps1 -Branch feature/command-timeouts-and-dialogs
+#   powershell -ExecutionPolicy Bypass -File scripts\sync-upstream.ps1 -Branch master
 param(
-    [string]$Branch = "feature/command-timeouts-and-dialogs",
+    [string]$Branch = "master",
     [string]$Uv = "C:\Users\voyager2\.pyenv\pyenv-win\versions\3.12.3\Scripts\uv.exe"
 )
 $ErrorActionPreference = "Stop"
@@ -19,11 +19,7 @@ if (-not (git remote | Select-String -SimpleMatch "upstream")) {
 git fetch upstream --tags
 if ($LASTEXITCODE) { throw "git fetch upstream failed." }
 
-# Keep the fork's master an exact mirror of upstream (it never carries fork commits).
-git switch master
-git merge --ff-only upstream/master
-if ($LASTEXITCODE) { throw "master has diverged from upstream/master; inspect it before continuing." }
-
+# The fork's master carries the fork's commits; upstream is followed through the upstream/master ref.
 git switch $Branch
 Write-Host "New upstream commits:"
 git log --oneline "HEAD..upstream/master"
@@ -41,4 +37,4 @@ if ($LASTEXITCODE) { throw "uv sync failed." }
 if ($LASTEXITCODE) { throw "Tests failed after the merge; fix them before pushing." }
 
 Write-Host ""
-Write-Host "Merged and tested. Push when satisfied:  git push origin master $Branch" -ForegroundColor Green
+Write-Host "Merged and tested. Push when satisfied:  git push origin $Branch" -ForegroundColor Green

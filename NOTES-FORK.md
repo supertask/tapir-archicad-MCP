@@ -8,10 +8,13 @@
 
 | ブランチ | 役割 |
 | --- | --- |
-| `master` | upstream の master の**写し**。フォーク独自のコミットは載せない |
-| `feature/command-timeouts-and-dialogs` | フォークの改善（下記）。**実際に使うのはこのブランチ** |
+| `master` | **フォークの正式版**。フォークの改善を載せ、upstream の更新はここにマージする |
+| 短期の作業ブランチ | 新しい改善はブランチで作り、テストが通ったら `master` にマージして消す |
+| PR 用ブランチ | 元のリポジトリに PR を出す時だけ、`upstream/master` から切って改善を cherry-pick する |
 
-remote は `origin`（フォーク）と `upstream`（元のリポジトリ）の2つ。`upstream` は push 先を `DISABLED` にしてあり、誤って元のリポジトリに push できない。
+remote は `origin`（フォーク）と `upstream`（元のリポジトリ）の2つ。`upstream` は push 先を `DISABLED` にしてあり、誤って元のリポジトリに push できない。元のリポジトリの最新は、ローカルのブランチではなく `upstream/master` で参照する。
+
+2026-10-18 に運用を変えた。それまでは `master` を upstream の写しにして、改善は `feature/command-timeouts-and-dialogs` に載せていた。この日に `master` をそのブランチまで fast-forward して、以後は `master` を正式版にした。
 
 ## このフォークで足したもの
 
@@ -37,19 +40,18 @@ cd C:\Users\voyager2\projects\mw\architect\tapir-archicad-MCP-fork
 powershell -ExecutionPolicy Bypass -File scripts\sync-upstream.ps1
 ```
 
-upstream を取得し、`master` を upstream に合わせ、作業ブランチにマージして、`uv sync` とテストまで行う。push はしないので、結果を確かめてから `git push origin master feature/command-timeouts-and-dialogs` を実行する。
+upstream を取得して `master` にマージし、`uv sync` とテストまで行う。push はしないので、結果を確かめてから `git push origin master` を実行する。
 
 **手作業でやる場合:**
 
 ```powershell
 $uv = "C:\Users\voyager2\.pyenv\pyenv-win\versions\3.12.3\Scripts\uv.exe"   # PATH の uv は壊れている
 git fetch upstream --tags
-git switch master;  git merge --ff-only upstream/master
-git switch feature/command-timeouts-and-dialogs
+git switch master
 git merge upstream/master          # 衝突したら下の「衝突しやすい所」を見て解消 → git add → git commit
 & $uv sync
 & $uv run pytest -q
-git push origin master feature/command-timeouts-and-dialogs
+git push origin master
 ```
 
 **衝突しやすい所:** `tools/custom/functions.py` の `archicad_call_tool`（`allow_duplicate` 引数と `check_duplicate` の呼び出し）と `_execute_tool`（`guard.preflight` と `guard.run` で `_dispatch_command` を包む部分）。upstream がここを書き換えたら、upstream 側の新しい形に合わせて、この2か所の差し込みだけを入れ直す。
