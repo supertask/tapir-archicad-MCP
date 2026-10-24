@@ -78,28 +78,13 @@ git push origin master
 - 次回以降の同期でも同じ問題が起きたら、`UV_PROJECT_ENVIRONMENT` で新しいフォルダに入れて設定を向け直す。
 - `command_guard.py` の `LONG_RUNNING_COMMANDS` に、v0.6.5 で増えた `project_update_hotlinks` と `project_change_hotlink_nodes` を追加した。
 
-## 追加したツール（2026-10-17）
+## ダイアログ対策以外の追加をやめた（2026-10-25）
 
-他の Archicad MCP（davidharutyunyan/archicad-mcp-connector、Boti-Ormandi/archicad-mcp、alesdev88/Archicad-MCP、vitormartins-arq/archicad-mcp-aberto ほか）のコードを読み、Archicad 26 + Windows で独自アドオンなしにできるものを取り入れた。
+フォークで足したもののうち、ダイアログ対策（上の「このフォークで足したもの」）だけを残し、ほかは削除した。
 
-| ツール | 内容 | ファイル |
-| --- | --- | --- |
-| `archicad_capture_view` | 必要ならビューを開いてズームし、今のウィンドウを Archicad 自身に画像で書き出させて返す（2026-10-25 から。下の「キャプチャの差し替え」）。返す画像は長辺 `max_size`（既定 2048、0 で原寸）、原寸 PNG は必ず残してパスを返す | `capture.py`、`tools/custom/vision_tools.py` |
-| `archicad_get_preview_image` | 要素のプレビュー／ゾーンの平面切り抜きを、base64 の文字ではなく画像で返す | `tools/custom/vision_tools.py` |
-| `archicad_publish` | パブリッシャーセットを書き出し、できたファイルを列挙し、PDF の先頭ページを画像で返す（pypdfium2） | `tools/custom/vision_tools.py` |
-| `archicad_batch` | 複数の命令を1回で順に実行し、1件ずつ結果を返す。全件を先に検証、失敗で停止、`expect_window_type` でウィンドウ違いを防ぐ。各命令はガードを通る | `tools/custom/workflow_tools.py` |
-| `archicad_save_project` | 保存後にファイルの更新時刻を確認して、本当に保存できたかを返す | `tools/custom/workflow_tools.py` |
-| `archicad_get_guide` | Archicad 26 日本語版の使い方ガイド | `guides/archicad26_guide.md` |
-| `archicad_list_commands(query=)` | 命令一覧をキーワードで絞り込み（upstream の `functions.py` への小さな差し込み） | `tools/custom/functions.py` |
-
-- 依存に Pillow と pypdfium2 を追加した（PyMuPDF は AGPL なので使わない）。
-- 撮影の解像度は Archicad のウィンドウの大きさで決まる。スライドなどで大きな絵が要る時は `archicad_publish` の PDF を使う。
-- 3D のカメラは Tapir 1.7.1 では設定できない。Tapir 本体には `Get/Set3DProjectionSettings` が取り込み済み（2026-10-15、1.7.1 の後）なので、次の版が出たら回転撮影を足す。
-
-## キャプチャの差し替え（2026-10-25）
-
-- `archicad_capture_view` の中身を、Windows の PrintWindow でウィンドウを撮る方式から、Tapir 1.7.2 の `SaveCurrentWindowAsImage`（「名前を付けて保存」で画像形式を選ぶのと同じ）で Archicad に書き出させる方式に替えた。ツール名と引数はほぼそのまま（`settle_timeout_seconds` を削除、`entire_drawing` を追加）。
-- **Why:** 2026-10-24 の比較で、作図領域が画面上グレーのまま描かれない状態だと、PrintWindow はグレーしか撮れなかった。`SaveCurrentWindowAsImage` は同じ状態でも平面図・3D を正しく書き出した（平面約4秒、3D約1秒）。
-- 書き出されるのは作図領域だけ。メニューやダイアログを含む画面全体を見たい時は、OS 側のスクリーンショット（Windows-MCP など）を使う。
-- Tapir 1.7.2 より古いと失敗し、Tapir の更新を促すエラーを返す。命令は名前で直接呼ぶので、生成されたツール一覧（upstream の版）には依存しない。
-- `capture.py` から PrintWindow まわり（Win32 呼び出し、描画が落ち着くまで待つ処理）を削除した。
+- 削除したツール: `archicad_capture_view`、`archicad_get_preview_image`、`archicad_publish`、`archicad_batch`、`archicad_save_project`、`archicad_get_guide`、`archicad_list_commands` の `query` 引数
+- 削除したファイル: `capture.py`、`tools/custom/vision_tools.py`、`tools/custom/workflow_tools.py`、`guides/`、`tests/unit/test_fork_tools.py`。依存の Pillow と pypdfium2 も外した
+- **Why:** upstream の命令で代わりが利く（ビューの画像は v0.6.6 の `project_save_current_window_as_image` でファイルに書き出して開く、パブリッシュは `navigator_publish_publisher_set`、要素のプレビューは `elements_get_element_preview_image`）。画面全体のスクリーンショットは OS 側のツール（Windows-MCP など）で足りる。フォークの差分を小さくして、upstream の取り込みを楽にする
+- ダイアログ対策は upstream にまだない（v0.6.6 時点。upstream にあるのは、時間がかかったらジョブ番号を返す仕組みだけ）ので残した
+- 削除前のコードは、マージコミット `db0a6b4`（PR #2 のマージ）までの履歴に残っている
+- 2026-10-17〜25 の経緯（他の Archicad MCP から取り入れたツール、PrintWindow から `SaveCurrentWindowAsImage` への差し替えと、作図領域がグレーのとき PrintWindow ではグレーしか撮れなかった比較結果）も、同じ履歴の `NOTES-FORK.md` にある
