@@ -158,9 +158,7 @@ def _get_tapir_version_warning(tapir: TapirInfo) -> str | None:
         "STEP 1: Use this tool FIRST to search for the right command name for your task. "
         "Do NOT guess or hallucinate command names. "
         "STEP 2: Once you find the relevant command name, you MUST use the 'archicad_get_command_schema' "
-        "tool to learn its exact required arguments. "
-        "Optional 'query' keeps only commands whose name or description contains every word of it "
-        "(case-insensitive), e.g. 'publisher' or 'zone image'."
+        "tool to learn its exact required arguments."
     ),
     annotations=ToolAnnotations(
         readOnlyHint=True,
@@ -169,16 +167,14 @@ def _get_tapir_version_warning(tapir: TapirInfo) -> str | None:
         openWorldHint=False,
     ),
 )
-def archicad_list_commands(query: str | None = None) -> list[CommandOverview]:
+def archicad_list_commands() -> list[CommandOverview]:
     log.info("Executing archicad_list_commands tool...")
-    words = query.lower().split() if query else []
     return [
         CommandOverview(
             name=tool["name"],
             description=tool["description"],
         )
         for tool in TOOL_DISCOVERY_CATALOG.values()
-        if all(word in f"{tool['name']} {tool['title']} {tool['description']}".lower() for word in words)
     ]
 
 
@@ -359,4 +355,3 @@ async def archicad_get_job(job_handle: str | None = None) -> dict:
     job = store.get(job_handle)
     await store.wait(job)
     return store.response(job)
-
