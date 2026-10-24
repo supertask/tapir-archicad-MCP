@@ -78,6 +78,13 @@ git push origin master
 - 次回以降の同期でも同じ問題が起きたら、`UV_PROJECT_ENVIRONMENT` で新しいフォルダに入れて設定を向け直す。
 - `command_guard.py` の `LONG_RUNNING_COMMANDS` に、v0.6.5 で増えた `project_update_hotlinks` と `project_change_hotlink_nodes` を追加した。
 
+## upstream v0.6.6 の取り込み（2026-10-25）
+
+- upstream v0.6.6（Tapir 1.7.2 対応、multiconn-archicad 0.9.5）をブランチ `sync/upstream-v0.6.6` でマージし、PR #1 で `master` に入れた。先にフォークの整理（PR #2、#3）を `master` に入れ、その上で取り込んだ。
+- フォークが依存に手を入れなくなったので、衝突はなかった（`pyproject.toml` と `uv.lock` は upstream と同じ）。
+- v0.6.6 で増えた `project_save_current_window_as_image` は `LONG_RUNNING_COMMANDS` に入れてある。
+- 動作確認用の環境は `.venv-066`（`UV_PROJECT_ENVIRONMENT=.venv-066 uv sync`）。設定3か所はまだ `.venv-065` を向いている。新しい命令（電気設備、デザインオプション、グラフィックオーバーライド等）を使うには、設定を `.venv-066` に向け直す必要がある（Tapir アドオンは 2026-10-24 に 1.7.2 にした）。
+
 ## ダイアログ対策以外の追加をやめた（2026-10-25）
 
 フォークで足したもののうち、ダイアログ対策（上の「このフォークで足したもの」）だけを残し、ほかは削除した。
