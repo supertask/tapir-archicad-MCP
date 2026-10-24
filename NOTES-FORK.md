@@ -84,7 +84,7 @@ git push origin master
 
 | ツール | 内容 | ファイル |
 | --- | --- | --- |
-| `archicad_capture_view` | 必要ならビューを開いてズームし、描画が落ち着くのを待ってから Archicad のウィンドウを PrintWindow で撮って画像で返す。返す画像は長辺 `max_size`（既定 2048、0 で原寸）、原寸 PNG は必ず保存してパスを返す | `capture.py`、`tools/custom/vision_tools.py` |
+| `archicad_capture_view` | 必要ならビューを開いてズームし、今のウィンドウを Archicad 自身に画像で書き出させて返す（2026-10-25 から。下の「キャプチャの差し替え」）。返す画像は長辺 `max_size`（既定 2048、0 で原寸）、原寸 PNG は必ず残してパスを返す | `capture.py`、`tools/custom/vision_tools.py` |
 | `archicad_get_preview_image` | 要素のプレビュー／ゾーンの平面切り抜きを、base64 の文字ではなく画像で返す | `tools/custom/vision_tools.py` |
 | `archicad_publish` | パブリッシャーセットを書き出し、できたファイルを列挙し、PDF の先頭ページを画像で返す（pypdfium2） | `tools/custom/vision_tools.py` |
 | `archicad_batch` | 複数の命令を1回で順に実行し、1件ずつ結果を返す。全件を先に検証、失敗で停止、`expect_window_type` でウィンドウ違いを防ぐ。各命令はガードを通る | `tools/custom/workflow_tools.py` |
@@ -95,3 +95,11 @@ git push origin master
 - 依存に Pillow と pypdfium2 を追加した（PyMuPDF は AGPL なので使わない）。
 - 撮影の解像度は Archicad のウィンドウの大きさで決まる。スライドなどで大きな絵が要る時は `archicad_publish` の PDF を使う。
 - 3D のカメラは Tapir 1.7.1 では設定できない。Tapir 本体には `Get/Set3DProjectionSettings` が取り込み済み（2026-10-15、1.7.1 の後）なので、次の版が出たら回転撮影を足す。
+
+## キャプチャの差し替え（2026-10-25）
+
+- `archicad_capture_view` の中身を、Windows の PrintWindow でウィンドウを撮る方式から、Tapir 1.7.2 の `SaveCurrentWindowAsImage`（「名前を付けて保存」で画像形式を選ぶのと同じ）で Archicad に書き出させる方式に替えた。ツール名と引数はほぼそのまま（`settle_timeout_seconds` を削除、`entire_drawing` を追加）。
+- **Why:** 2026-10-24 の比較で、作図領域が画面上グレーのまま描かれない状態だと、PrintWindow はグレーしか撮れなかった。`SaveCurrentWindowAsImage` は同じ状態でも平面図・3D を正しく書き出した（平面約4秒、3D約1秒）。
+- 書き出されるのは作図領域だけ。メニューやダイアログを含む画面全体を見たい時は、OS 側のスクリーンショット（Windows-MCP など）を使う。
+- Tapir 1.7.2 より古いと失敗し、Tapir の更新を促すエラーを返す。命令は名前で直接呼ぶので、生成されたツール一覧（upstream の版）には依存しない。
+- `capture.py` から PrintWindow まわり（Win32 呼び出し、描画が落ち着くまで待つ処理）を削除した。

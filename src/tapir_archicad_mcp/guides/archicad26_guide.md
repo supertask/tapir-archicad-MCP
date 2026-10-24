@@ -12,7 +12,7 @@ Archicad 26 build 4007 JPN with the Tapir add-on, mostly the hard way.
 | Exact parameters of a command | `archicad_get_command_schema` |
 | One command | `archicad_call_tool` |
 | Many commands in a row | `archicad_batch` (one call, per-step results) |
-| See the result | `archicad_capture_view` (window), `archicad_get_preview_image` (one element or zone) |
+| See the result | `archicad_capture_view` (current view), `archicad_get_preview_image` (one element or zone) |
 | PDF of sheets | `archicad_publish` (publisher set, then page images) |
 | Save and be sure it saved | `archicad_save_project` |
 | A dialog is blocking | `archicad_get_dialogs`, then ask the user to close it |
@@ -40,10 +40,13 @@ Archicad 26 build 4007 JPN with the Tapir add-on, mostly the hard way.
 
 ## Seeing the result
 
-- `archicad_capture_view` paints the Archicad window into an image even when it is behind other
-  windows. It refuses while a dialog is open and fails if the window is minimized.
-- The returned image is 2048 px on its long side by default; a full-resolution PNG is saved and
-  its path returned (use that file for slides).
+- `archicad_capture_view` has Archicad save the current window as a picture (Tapir 1.7.2+
+  `SaveCurrentWindowAsImage`). Archicad draws it itself, so it is right even when the window is
+  behind others or shows a grey canvas on screen. It holds the drawing area only; for menus,
+  palettes or dialogs, take an OS-level screenshot. It refuses while a dialog is open.
+- `entire_drawing=true` gives the whole 2D drawing instead of the current zoom.
+- The returned image is 2048 px on its long side by default; the full-resolution PNG Archicad
+  wrote is kept and its path returned (use that file for slides).
 - 2D zoom: `fit_in_window`, or `fit_element_guids` to zoom onto elements. A precise zoom box can
   only be stored in a view (`navigator_set_view_settings` with `saveZoom` and `zoom`) and applied
   by opening that view.

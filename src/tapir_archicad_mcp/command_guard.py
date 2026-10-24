@@ -44,6 +44,7 @@ LONG_RUNNING_COMMANDS = frozenset(
         "project_save_project_as_archive",
         "project_save_as_module_file",
         "project_print_view",
+        "project_save_current_window_as_image",
         "project_rebuild_view",
         "project_create_hotlink_nodes",
         "project_update_hotlinks",
