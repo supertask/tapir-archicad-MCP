@@ -1,9 +1,10 @@
-"""Tests of the fork's workflow and vision tools (batch, save, publish, previews, capture helpers)."""
+"""Tests of the fork's workflow and vision tools (batch, save, publish, previews, view images)."""
 
 from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import time
 from pathlib import Path
@@ -13,11 +14,13 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image as McpImage
 from mcp.types import TextContent
 from multiconn_archicad import SoloProjectID, UntitledProjectID
+from multiconn_archicad.errors import TapirCommandError
 from PIL import Image
 
-from tapir_archicad_mcp.capture import capture_when_settled, crop_fraction, encode_image, looks_blank
+from tapir_archicad_mcp.capture import crop_fraction, encode_image, looks_blank
 from tapir_archicad_mcp.tools.custom.functions import archicad_list_commands
 from tapir_archicad_mcp.tools.custom.vision_tools import (
+    archicad_capture_view,
     archicad_get_preview_image,
     archicad_publish,
 )
@@ -77,24 +80,20 @@ def test_looks_blank_tells_uniform_from_drawn():
     assert not looks_blank(image)
 
 
-def test_capture_waits_until_two_grabs_match():
-    frames = iter([Image.new("L", (10, 10), v) for v in (0, 120, 200, 200)])
-    now = [0.0]
-    image, settled = capture_when_settled(
-        lambda: next(frames), timeout_seconds=10, clock=lambda: now[0],
-        sleep=lambda s: now.__setitem__(0, now[0] + s),
-    )
-    assert settled and image.getpixel((0, 0)) == 200
+def _archicad_writes_view_images(fake, response=None):
+    """Make the fake answer SaveCurrentWindowAsImage by writing a drawn PNG, as Archicad does."""
+    original = fake.core.post_tapir_command
 
+    def post(command, parameters=None):
+        if command != "SaveCurrentWindowAsImage":
+            return original(command, parameters)
+        fake.calls.append((command, parameters))
+        image = Image.new("RGB", (300, 200), "white")
+        image.paste((0, 0, 0), (50, 50, 250, 150))
+        image.save(parameters["imageFilePath"], format="PNG")
+        return {"imageFilePath": parameters["imageFilePath"], **(response or {})}
 
-def test_capture_gives_up_at_the_timeout():
-    values = iter(range(0, 250, 10))
-    now = [0.0]
-    _, settled = capture_when_settled(
-        lambda: Image.new("L", (10, 10), next(values)), timeout_seconds=1, interval_seconds=0.5,
-        clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s),
-    )
-    assert not settled
+    fake.core.post_tapir_command = post
 
 
 # --- discovery ---------------------------------------------------------------
@@ -195,6 +194,44 @@ def test_save_refuses_an_untitled_project(fake_archicad):
 
 
 # --- previews and publishing --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_capture_view_returns_the_image_archicad_wrote(fake_archicad, capture_folder):
+    fake_archicad.on_tapir_command("ChangeWindow", SUCCESS)
+    fake_archicad.on_tapir_command("FitInWindow", SUCCESS)
+    zoom = {"xMin": 0, "yMin": 0, "xMax": 10, "yMax": 5}
+    _archicad_writes_view_images(fake_archicad, {"zoom": zoom, "rotation": 0})
+    blocks = await archicad_capture_view(
+        fake_archicad.port, window={"windowType": "FloorPlan", "storyIndex": 0}, fit_in_window=True,
+        entire_drawing=True, max_size=150, image_format="png",
+    )
+    assert isinstance(blocks[0], TextContent) and isinstance(blocks[1], McpImage)
+    command, params = fake_archicad.calls[-1]
+    assert command == "SaveCurrentWindowAsImage" and params["entireDrawing"] is True
+    assert Path(params["imageFilePath"]).parent == capture_folder
+    info = json.loads(blocks[0].text)
+    assert info["fullResolution"] == [300, 200] and info["returnedSize"] == [150, 100]
+    assert info["zoom"] == zoom and len(info["steps"]) == 2 and "warning" not in info
+
+
+@pytest.mark.asyncio
+async def test_capture_view_crops_and_keeps_both_files(fake_archicad, capture_folder):
+    _archicad_writes_view_images(fake_archicad)
+    blocks = await archicad_capture_view(fake_archicad.port, crop=[0.0, 0.0, 0.5, 0.5], max_size=0)
+    info = json.loads(blocks[0].text)
+    assert info["returnedSize"] == [150, 100] and info["fullResolution"] == [300, 200]
+    assert Path(info["croppedPath"]).is_file() and Path(info["fullResolutionPath"]).is_file()
+
+
+@pytest.mark.asyncio
+async def test_capture_view_explains_an_old_tapir(fake_archicad):
+    def fail(command, parameters=None):
+        raise TapirCommandError(message="Unknown command", code=1)
+
+    fake_archicad.core.post_tapir_command = fail
+    with pytest.raises(ToolError, match="Tapir 1.7.2"):
+        await archicad_capture_view(fake_archicad.port)
 
 
 @pytest.mark.asyncio

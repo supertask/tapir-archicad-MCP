@@ -1,4 +1,4 @@
-"""Tools that let the model see Archicad: window captures, preview images, published PDFs (fork addition).
+"""Tools that let the model see Archicad: view images, preview images, published PDFs (fork addition).
 
 Images go back as MCP image content the model can look at. The returned copy is
 scaled to max_size on its long side (default 2048 px, readable and fine for a
@@ -17,19 +17,16 @@ from typing import Any, Literal
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image as McpImage
 from mcp.types import TextContent, ToolAnnotations
+from multiconn_archicad.errors import ArchicadAPIError
 from PIL import Image
 
 from tapir_archicad_mcp.app import mcp
 from tapir_archicad_mcp.capture import (
     DEFAULT_MAX_SIZE,
-    CaptureError,
     capture_dir,
-    capture_when_settled,
-    capture_window,
     crop_fraction,
     encode_image,
     looks_blank,
-    main_window_for_port,
     timestamped_path,
 )
 from tapir_archicad_mcp.context import command_guard_instance
@@ -40,6 +37,10 @@ log = logging.getLogger(__name__)
 
 ImageFormat = Literal["jpeg", "png"]
 MAX_PDF_PAGES = 20
+# Tapir 1.7.2+. Called by name so it works whatever the generated tool list contains;
+# the tool name is what the command guard uses for its time limit and pending records.
+VIEW_IMAGE_COMMAND = "SaveCurrentWindowAsImage"
+VIEW_IMAGE_TOOL = "project_save_current_window_as_image"
 
 
 def _image_block(image: Image.Image, max_size: int, image_format: ImageFormat) -> tuple[McpImage, tuple[int, int]]:
@@ -60,13 +61,13 @@ def _save_full(image: Image.Image, stem: str) -> str:
     return str(path)
 
 
-def capture_view(
+def export_view(
     port: int,
     navigator_item_guid: str | None,
     window: dict | None,
     fit_in_window: bool,
     fit_element_guids: list[str] | None,
-    settle_timeout_seconds: float,
+    entire_drawing: bool,
 ) -> tuple[Image.Image, dict]:
     steps: list[str] = []
     if navigator_item_guid and window:
@@ -85,29 +86,50 @@ def capture_view(
     elif fit_in_window:
         require_success("navigator_fit_in_window", run_command("navigator_fit_in_window", port, {}))
         steps.append("fit everything in the window")
-    # Never capture over a dialog: refuse the same way a command would.
-    command_guard_instance.get().preflight(_get_header(port), port)
+    path = timestamped_path(capture_dir(), f"port{port}_view", ".png")
+    params: dict[str, Any] = {"imageFilePath": str(path), "entireDrawing": entire_drawing}
+    header = _get_header(port)
+    guard = command_guard_instance.get()
+    # Refuse over a dialog and bound the wait, the same way a command would.
+    guard.preflight(header, port)
     try:
-        hwnd, title = main_window_for_port(port)
-        image, settled = capture_when_settled(lambda: capture_window(hwnd), settle_timeout_seconds)
-    except CaptureError as e:
-        raise ToolError(str(e)) from e
-    return image, {"windowTitle": title, "steps": steps, "settled": settled}
+        result = guard.run(
+            VIEW_IMAGE_TOOL, port, json.dumps(params, sort_keys=True),
+            lambda: header.core.post_tapir_command(command=VIEW_IMAGE_COMMAND, parameters=params),
+        )
+    except ArchicadAPIError as e:
+        raise ToolError(
+            f"Archicad could not save the view as an image: {e}. {VIEW_IMAGE_COMMAND} needs Tapir 1.7.2 or later; "
+            "check tapirVersion in discovery_list_active_archicads."
+        ) from e
+    if not path.is_file():
+        raise ToolError(f"{VIEW_IMAGE_COMMAND} reported success but wrote no file at {path}.")
+    with Image.open(path) as written:
+        image = written.copy()
+    info: dict[str, Any] = {"steps": steps, "fullResolutionPath": str(path)}
+    for key in ("zoom", "rotation"):
+        if isinstance(result, dict) and key in result:
+            info[key] = result[key]
+    return image, info
 
 
 @mcp.tool(
     name="archicad_capture_view",
-    title="Capture the Archicad Window as an Image",
+    title="Get the Current Archicad View as an Image",
     description=(
-        "Returns a picture of the Archicad window (plan, section, 3D, layout...) so you can check your work "
-        "visually. Optionally first opens a view (navigator_item_guid from the navigator tree, or window = the "
-        "app_change_window params such as {'windowType': 'FloorPlan', 'storyIndex': 0} or {'windowType': '3DModel'}) "
-        "and zooms (fit_in_window, or fit_element_guids to zoom onto elements). Waits until the view stops "
-        "redrawing. crop = [left, top, right, bottom] as fractions of the window, to look closely at one area. "
-        "The returned image is scaled to max_size px on its long side (default 2048; 0 = full resolution) as jpeg "
-        "or png; a full-resolution PNG is always saved and its path returned (usable for slides). The 3D camera "
-        "cannot be set through the API on Archicad 26: use saved 3D views for fixed angles. Windows only; the "
-        "window must not be minimized; refused while a modal dialog is open."
+        "Returns a picture of what the current Archicad window shows (plan, section, 3D, layout...) so you can "
+        "check your work visually. Archicad draws the image itself (Tapir SaveCurrentWindowAsImage, as File > "
+        "Save As with a picture format), so it is right even when the window is behind others or not painted on "
+        "screen; it holds the drawing area only, without menus or palettes. Optionally first opens a view "
+        "(navigator_item_guid from the navigator tree, or window = the app_change_window params such as "
+        "{'windowType': 'FloorPlan', 'storyIndex': 0} or {'windowType': '3DModel'}) and zooms (fit_in_window, or "
+        "fit_element_guids to zoom onto elements). entire_drawing = the whole 2D drawing instead of the current "
+        "zoom. crop = [left, top, right, bottom] as fractions of the image, to look closely at one area. The "
+        "returned image is scaled to max_size px on its long side (default 2048; 0 = full resolution) as jpeg or "
+        "png; the full-resolution PNG Archicad wrote is kept and its path returned (usable for slides). Needs "
+        "Tapir 1.7.2+. The 3D camera cannot be set through the API on Archicad 26: use saved 3D views for fixed "
+        "angles. Refused while a modal dialog is open. For a screenshot of the whole Archicad window or desktop, "
+        "use an OS-level screenshot tool instead."
     ),
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
@@ -117,27 +139,24 @@ async def archicad_capture_view(
     window: dict | None = None,
     fit_in_window: bool = False,
     fit_element_guids: list[str] | None = None,
+    entire_drawing: bool = False,
     crop: list[float] | None = None,
     max_size: int = DEFAULT_MAX_SIZE,
     image_format: ImageFormat = "jpeg",
-    settle_timeout_seconds: float = 10.0,
 ) -> list[TextContent | McpImage]:
     image, info = await asyncio.to_thread(
-        capture_view, port, navigator_item_guid, window, fit_in_window, fit_element_guids, settle_timeout_seconds,
+        export_view, port, navigator_item_guid, window, fit_in_window, fit_element_guids, entire_drawing,
     )
     try:
-        image = crop_fraction(image, crop)
+        cropped = crop_fraction(image, crop)
     except ValueError as e:
         raise ToolError(str(e)) from e
-    full_path = await asyncio.to_thread(_save_full, image, f"port{port}_view")
-    block, size = _image_block(image, max_size, image_format)
-    info.update({
-        "fullResolutionPath": full_path, "fullResolution": list(image.size), "returnedSize": list(size),
-    })
-    if not info["settled"]:
-        info["warning"] = "The view was still changing when captured; capture again if it looks incomplete."
-    if looks_blank(image):
-        info["warning"] = "The capture is almost uniform; the view may not have been drawn. Capture again."
+    if cropped is not image:
+        info["croppedPath"] = await asyncio.to_thread(_save_full, cropped, f"port{port}_view_crop")
+    block, size = _image_block(cropped, max_size, image_format)
+    info.update({"fullResolution": list(image.size), "returnedSize": list(size)})
+    if looks_blank(cropped):
+        info["warning"] = "The image is almost uniform; the view may be empty here. Zoom or open another view."
     return [_text_block(info), block]
 
 
